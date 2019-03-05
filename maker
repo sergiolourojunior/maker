@@ -1,0 +1,140 @@
+#!/usr/bin/env php
+
+<?php
+
+// ex: php novo_site -d dominio.com.br [-b] [-e admin@dominio.com.br] [-s]
+// -d dominio.com.br
+// -b [criar banco de dados]
+// -e admin@dominio.com.br
+// -s [instalar certificado ssl]
+
+define('BD_TYPE', 'mysql');
+define('BD_HOST', 'localhost');
+define('BD_USER', 'root');
+define('BD_PASS', 'senha-root');
+
+$shortopts = "";
+$shortopts .= "d:"; // dominio (obrigatorio)
+$shortopts .= "e:"; // email (obrigatorio)
+$shortopts .= "b::"; // valor opcional
+$shortopts .= "s::"; // valor opcional
+
+$longopts = [
+	'required:', // valor obrigatorio
+	'optional::', // valor opcional
+	'optional::', // valor opcional
+	'optional::' // valor opcional
+];
+
+$options = getopt($shortopts, $longopts);
+
+if(if(isset($options['d']))) {
+	// RETIRAR WWW DO DOMINIO CASO EXISTA
+	$dominio = $options['d'];
+	if(substr($dominio, 0, 3) == 'www') {
+		$dominio = substr($dominio, 4);
+	}
+	$return['dominio'] = $dominio;
+	$return['dominio_alt'] = 'www.'.$dominio;
+
+	// EMAIL DO ADMIN
+	if(!isset($options['e'])) {
+		$email_admin = 'admin@'.$dominio;
+	} else {
+		$email_admin = $options['e'];
+	}
+	$return['email_admin'] = $email_admin;
+
+	$d_array = explode('.', $dominio);
+	$user_ftp = $d_array[0];
+	$return['user_ftp'] = $user_ftp;
+	$return['pass_ftp'] = substr(md5($dominio.time()),0,8);
+
+
+	$caminho_conf = '/etc/apache2/sites-available/'.$dominio.'.conf';
+	$data_conf = '
+	<VirtualHost *:80>
+	ServerAdmin '.$email_admin.'
+	ServerName '.$dominio.'
+	ServerAlias www.'.$dominio.'
+	DocumentRoot /var/www/'.$user_ftp.'/public_html
+	ErrorLog /var/www/'.$user_ftp.'/logs/error.log
+	CustomLog /var/www/'.$user_ftp.'/logs/access.log combined
+	</VirtualHost>';
+
+
+	$caminho_site = '/var/www/'.$user_ftp;
+	$caminho_site_arquivos = $caminho_site.'/public_html';
+	$caminho_site_logs = $caminho_site.'/logs';
+
+	$data_index = '
+	<html>
+	<head>
+	<meta charset="utf-8">
+	<title>Projeto Criado!</title>
+	<link href="https://fonts.googleapis.com/css?family=Roboto+Slab" rel="stylesheet">
+	<style>
+	body { background-color: #EFEFEF; font-family: \'Roboto Slab\'; font-size: 14px; display:flex; flex-direction: column; align-it$
+	h1 { font-size: 48px; margin: 0; }
+	h2 { font-weight: 400; }
+	h2 span { color: #710671; }
+	</style>
+	</head>
+	<body>
+	<h1>Servidor pronto!</h1>
+	<h2>Comece a usar agora mesmo o site <span>'.$dominio.'</span>.</h2>
+	</body>
+	</html>';
+
+
+	// EXPLORER
+	mkdir($caminho_site, 777);
+	mkdir($caminho_site_arquivos, 777);
+	mkdir($caminho_site_logs, 777);
+	file_put_contents($caminho_site_arquivos.'/index.html', $data_index);
+	file_put_contents($caminho_site_logs.'/error.log','');
+	file_put_contents($caminho_site_logs.'/access.log','');
+
+	// APACHE
+	file_put_contents($caminho_conf, $data_conf);
+	system('a2ensite '.$dominio.'.conf');
+	system('systemctl restart apache2');
+	system('chown -R $USER:$USER /var/www/'.$user_ftp.'/*');
+
+	// FTP
+	echo 'Senha para o usuário: '.$return['pass_ftp'];
+	system('adduser '.$user_ftp);
+	system('chown nobody:nogroup /var/www/'.$user_ftp);
+	system('chmod a-w /var/www/'.$user_ftp);
+	system('chown '.$user_ftp.':'.$user_ftp.' /var/www/'.$user_ftp.'/public_html');
+	system('echo "'.$user_ftp.'" | sudo tee -a /etc/vsftpd.userlist');
+
+	// SSL
+	if(isset($options['s'])) {
+		system('certbot --apache -d '.$dominio.' -d www.'.$dominio);
+	}
+
+	// BANCO DE DADOS
+	if(isset($options['b'])) {
+		$senha_bd = substr(md5(time().$dominio),0,8);
+		try {
+			$conn = new PDO(BD_TYPE.":host=".BD_HOST, BD_USER, BD_PASS);
+			$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+			$sql = "CREATE USER '{$user_ftp}'@'localhost' IDENTIFIED BY '{$senha_bd}';GRANT USAGE ON *.* TO '{$user_ftp}'@'localhost' REQUIRE NONE WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0;CREATE DATABASE IF NOT EXISTS `{$user_ftp}`;GRANT ALL PRIVILEGES ON `{$user_ftp}`.* TO '{$user_ftp}'@'localhost';";
+			$conn->exec($sql);
+			$return['user_bd'] = $user_ftp;
+			$return['pass_bd'] = $senha_bd;
+		}
+		catch(PDOException $e) {
+			echo $sql . "<br>" . $e->getMessage();
+		}
+	}
+
+	print_r($return);
+
+} else {
+	echo "Error: Domínio não inserido.";
+	exit(100);
+}
+
+?>
