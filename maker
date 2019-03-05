@@ -28,7 +28,7 @@ $longopts = [
 
 $options = getopt($shortopts, $longopts);
 
-if(if(isset($options['d']))) {
+if(isset($options['d'])) {
 	// RETIRAR WWW DO DOMINIO CASO EXISTA
 	$dominio = $options['d'];
 	if(substr($dominio, 0, 3) == 'www') {
